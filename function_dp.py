@@ -138,7 +138,6 @@ def vniigaz_inclined(lamda_tube, diameter, alfa,
     dp_dz = (i * density_liquid + density_gas * cos_alfa) * 9.80665
     return dp_dz
 
-# FIXME: Отрицательные значения! При расчёте dp через cos(alfa)!
 def vniigaz_horizontal(lamda_tube, diameter, alfa,
                             velocity_liquid, velocity_gas,
                             density_liquid, density_gas,
