@@ -124,6 +124,28 @@ class Fluid:
         Bg = (self.Pstd * self.get_Z(P, T) * T) / ((P) * self.Tstd)
 
         return Bg
+    
+    def get_ro(self, P: float, T,) -> float:      # плотность [кг/м³]
+        """
+        Расчёт плотости газа ro.
+        ----------
+        ro = rostd*P*/T/z*Tstd*1000000/Pstd
+
+        Параметры
+        ----------
+        P : float
+            Давление, МПа.
+        T : float
+            Температура, МПа
+
+        Возвращает
+        ----------
+        float
+            Плотность газа, кг/м³.
+        """
+
+        ro = self.rho_c * (P / self.Pstd) * (self.Tstd / T) / self.get_Z(P, T)
+        return ro
 
     def get_fvf(self, pressure: float) -> float:
         """Получить значение FVF (Formation Volume Factor) (дол.ед.) при заданном давлении (МПа)."""
