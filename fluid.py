@@ -144,7 +144,8 @@ class Fluid:
             Плотность газа, кг/м³.
         """
 
-        ro = self.rho_c * (P / self.Pstd) * (self.Tstd / T) / self.get_Z(P, T)
+        # ro = self.rho_c * (P / self.Pstd) * (self.Tstd / T) / self.get_Z(P, T)
+        ro = self.rho_c / self.get_fvf(P)
         return ro
 
     def get_fvf(self, pressure: float) -> float:
