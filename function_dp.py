@@ -1,6 +1,29 @@
 import numpy as np
 import math
 
+def lyamda(delta0, diameter,
+               velocity_liquid, velocity_gas,
+               density_liquid, density_gas,
+               sigma, viscosity_gas):
+    """
+    Расчёт по формуле Зигранга-Сильвестра 
+    """
+
+    R = velocity_liquid / velocity_gas
+    betta = velocity_liquid / (velocity_liquid + velocity_gas)
+
+    ro_b = density_liquid * betta + density_gas * (1 - betta)
+    velocity_mix = velocity_liquid + velocity_gas
+    delta1 = 28.5 * sigma / ro_b / velocity_mix**2
+    delta = delta0 + R * (delta1 - delta0) / 0.007
+    eps = delta/diameter/1000
+    Re = velocity_gas * density_gas * diameter / viscosity_gas
+
+    # FIXME: Добавить коэфициент адаптации для формулы Зигранга-Сильвестра
+    lyamda = (-2*np.log10(eps/3.7 - 5.02/Re * np.log10(eps/3.7 + 13/Re)))**-2
+    # print(f'lyamda: {lyamda}, delta: {delta}, delta1: {delta1}, eps: {eps}')
+    return lyamda
+
 def vniigaz_vertical_one(lamda_tube, diameter,
                velocity_liquid, velocity_gas,
                density_liquid, density_gas,
