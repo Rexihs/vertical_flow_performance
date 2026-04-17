@@ -8,7 +8,7 @@ def lyamda(delta0, diameter,
     """
     Расчёт по формуле Зигранга-Сильвестра 
     """
-
+    delta0 = delta0*10**-3
     R = velocity_liquid / velocity_gas
     betta = velocity_liquid / (velocity_liquid + velocity_gas)
 
@@ -16,7 +16,7 @@ def lyamda(delta0, diameter,
     velocity_mix = velocity_liquid + velocity_gas
     delta1 = 28.5 * sigma / ro_b / velocity_mix**2
     delta = delta0 + R * (delta1 - delta0) / 0.007
-    eps = delta/diameter/1000
+    eps = delta/diameter
     Re = velocity_gas * density_gas * diameter / viscosity_gas
 
     # FIXME: Добавить коэфициент адаптации для формулы Зигранга-Сильвестра
