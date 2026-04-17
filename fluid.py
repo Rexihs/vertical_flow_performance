@@ -153,5 +153,5 @@ class Fluid:
         return np.interp(pressure*10, self.pvt_data['pressure'], self.pvt_data['fvf'])
 
     def get_viscosity(self, pressure: float) -> float:
-        """Получить значение вязкости (мПа·с) при заданном давлении (МПа)."""
-        return np.interp(pressure*10, self.pvt_data['pressure'], self.pvt_data['viscosity'])
+        """Получить значение вязкости (Па·с) при заданном давлении (МПа)."""
+        return (np.interp(pressure*10, self.pvt_data['pressure'], self.pvt_data['viscosity']))*10**-3
