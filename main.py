@@ -424,74 +424,107 @@ class MainWindow(QMainWindow):
     # =========================
     # РАСЧЁТЫ
     # =========================
-    def well_BHP(self, well_data, fluid, thp, temp_thp, temp_bhp, qgas, wgr, diameter, delta0, sigma, density_liquid):
-        well_df = pd.DataFrame(
-            {
-                "MD": well_data["MD"],
-                "TVD": well_data["TVD"],
-                "alfa": well_data["INCL"],
-                "D": diameter,
-                "Dp_dz": np.nan,
-                "P": np.nan,
-            }
-        )
 
-        for idx in well_df.index:
+    def calc_THP_from_BHP(self, well_data: pd, fluid: Fluid, BHP, Temp_THP, Temp_BHP,
+                          Qgas, WGR, diameter, delta0, sigma, density_liquid):
+    
+        well_df = pd.DataFrame({
+            'MD': well_data['MD'],
+            'TVD': well_data['TVD'],
+            'alfa': well_data['INCL'],
+            'D': diameter,
+            'Dp_dz': np.nan,
+            'P': np.nan
+        })
+
+        # стартуем с забоя
+        well_df.loc[len(well_df)-1, 'P'] = BHP
+
+        # идём СНИЗУ ВВЕРХ
+        for idx in well_df.index[::-1]:
+
             if idx == 0:
-                well_df.loc[idx, "P"] = thp
-            if idx == len(well_df) - 1:
                 break
 
-            tvd_last = well_df["TVD"].iloc[-1] if well_df["TVD"].iloc[-1] != 0 else 1.0
-            temp_idx = temp_thp + (temp_bhp - temp_thp) / tvd_last * well_df.loc[idx, "TVD"]
-            density_gas_idx = fluid.get_ro(well_df.loc[idx, "P"], temp_idx)
-            area = np.pi * well_df.loc[idx, "D"] ** 2 / 4
-            velocity_liquid_idx = ((qgas * 1000 / 86400) * wgr) / area
-            velocity_gas_idx = (qgas * 1000 / 86400) * fluid.get_fvf(well_df.loc[idx, "P"]) / area
+            temp_idx = Temp_THP + (Temp_BHP - Temp_THP) / well_df['TVD'].iloc[-1] * well_df.loc[idx, 'TVD']
 
-            lambda_idx = lyamda(
+            P_local = well_df.loc[idx, 'P'] #МПа
+
+            density_gas_idx = fluid.get_ro(P_local, temp_idx)
+
+            velocity_liquid_idx = ((Qgas * 1000 / 86400) * WGR) / (np.pi * diameter**2 / 4)
+            velocity_gas_idx = (Qgas * 1000 / 86400) * fluid.get_fvf(P_local) / (np.pi * diameter**2 / 4)
+
+            lyamda_idx = lyamda(
                 delta0=delta0,
-                diameter=well_df.loc[idx, "D"],
+                diameter=diameter,
                 velocity_liquid=velocity_liquid_idx,
                 velocity_gas=velocity_gas_idx,
                 density_liquid=density_liquid,
                 density_gas=density_gas_idx,
                 sigma=sigma,
-                viscosity_gas=fluid.get_viscosity(well_df.loc[idx, "P"]),
+                viscosity_gas=fluid.get_viscosity(P_local)
             )
 
-            if well_df.loc[idx, "alfa"] > 84:
+            if well_df.loc[idx, 'alfa'] > 84:
                 dp_dz = vniigaz_horizontal(
-                    lambda_idx,
-                    well_df.loc[idx, "D"],
-                    well_df.loc[idx, "alfa"],
-                    velocity_liquid_idx,
-                    velocity_gas_idx,
-                    density_liquid,
-                    density_gas_idx,
-                    well_df.loc[idx, "P"],
-                    sigma,
-                    (qgas * 1000 / 86400) * wgr,
+                    lyamda_idx, diameter, well_df.loc[idx, 'alfa'],
+                    velocity_liquid_idx, velocity_gas_idx,
+                    density_liquid, density_gas_idx,
+                    P_local, sigma, (Qgas * 1000 / 86400) * WGR
                 )
             else:
                 dp_dz = vniigaz_inclined(
-                    lambda_idx,
-                    well_df.loc[idx, "D"],
-                    well_df.loc[idx, "alfa"],
-                    velocity_liquid_idx,
-                    velocity_gas_idx,
-                    density_liquid,
-                    density_gas_idx,
-                    well_df.loc[idx, "P"],
-                    sigma,
-                    (qgas * 1000 / 86400) * wgr,
+                    lyamda_idx, diameter, well_df.loc[idx, 'alfa'],
+                    velocity_liquid_idx, velocity_gas_idx,
+                    density_liquid, density_gas_idx,
+                    P_local, sigma, (Qgas * 1000 / 86400) * WGR
                 )
 
-            well_df.loc[idx, "Dp_dz"] = dp_dz
-            md_step = well_df.loc[idx + 1, "MD"] - well_df.loc[idx, "MD"]
-            well_df.loc[idx + 1, "P"] = well_df.loc[idx, "P"] + dp_dz * 1e-6 * md_step
+            dL = well_df.loc[idx, 'MD'] - well_df.loc[idx-1, 'MD']
 
-        return float(well_df["P"].iloc[-1])
+            # движение вверх → давление падает
+            well_df.loc[idx-1, 'P'] = P_local - dp_dz * 1e-6 * dL
+
+        return well_df.loc[0, 'P']  # THP
+    
+    # Правильная формула расчёта BHP:
+    def well_BHP(self, well_data: pd, fluid: Fluid, THP_target,
+                 Temp_THP, Temp_BHP,
+                 Qgas, WGR, diameter, delta0, sigma, density_liquid):
+
+        # начальные границы (важно!)
+        BHP_min = THP_target
+        BHP_max = THP_target + 50  # запас (МПа)
+
+        tol = 1e-3
+        max_iter = 50
+
+        for _ in range(max_iter):
+
+            BHP_mid = 0.5 * (BHP_min + BHP_max)
+
+            THP_calc = self.calc_THP_from_BHP(
+                well_data, fluid, BHP_mid,
+                Temp_THP, Temp_BHP,
+                Qgas, WGR,
+                diameter, delta0, sigma, density_liquid
+            )
+
+            error = THP_calc - THP_target
+
+            if abs(error) < tol:
+                return BHP_mid
+
+            # бисекция
+            if error > 0:
+                BHP_max = BHP_mid
+            else:
+                BHP_min = BHP_mid
+
+        print("Warning: BHP not converged")
+        return BHP_mid
+
 
     def adapt_gdi(self, gdi_data, delta0, density_liquid):
         params = self.get_input_parameters()
