@@ -19,12 +19,12 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSlider,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QMenu,
 )
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -107,6 +107,10 @@ class MainWindow(QMainWindow):
         action_buttons_layout.addWidget(btn_adapt)
         layout.addLayout(action_buttons_layout)
 
+        btn_copy = QPushButton("Копировать таблицу")
+        btn_copy.clicked.connect(self.copy_table_to_clipboard)
+        action_buttons_layout.addWidget(btn_copy)      
+
         info_layout = QHBoxLayout()
         self.optimization_result_label = QLabel("Оптимальные параметры: ещё не рассчитаны")
         info_layout.addWidget(self.optimization_result_label, stretch=3)
@@ -121,6 +125,9 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setWidget(self.table)
 
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.table_context_menu)
+
         self.figure = Figure(figsize=(6, 4))
         self.canvas = FigureCanvas(self.figure)
 
@@ -131,12 +138,6 @@ class MainWindow(QMainWindow):
         content_splitter.setStretchFactor(1, 6)
         layout.addWidget(content_splitter, stretch=1)
 
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setMinimum(0)
-        self.slider.setMaximum(10)
-        self.slider.valueChanged.connect(self.update_plot)
-        layout.addWidget(self.slider)
-
         container = QWidget()
         container.setLayout(layout)
         self.setCentralWidget(container)
@@ -144,6 +145,38 @@ class MainWindow(QMainWindow):
     def _add_compact_field(self, grid, row, column, label_text, widget):
         grid.addWidget(QLabel(label_text), row, column)
         grid.addWidget(widget, row, column + 1)
+
+    def copy_table_to_clipboard(self):
+        """Копирует текущую таблицу (VFP или GDI) в буфер обмена в формате CSV."""
+        if self.vfp_data is not None and not self.vfp_data.empty:
+            df = self.vfp_data
+            clipboard_text = df.to_csv(sep='\t', index=False)
+        elif hasattr(self, 'table') and self.table.rowCount() > 0:
+            rows = self.table.rowCount()
+            cols = self.table.columnCount()
+            headers = [self.table.horizontalHeaderItem(j).text() for j in range(cols)]
+            lines = ['\t'.join(headers)]
+            for i in range(rows):
+                row_data = []
+                for j in range(cols):
+                    item = self.table.item(i, j)
+                    row_data.append(item.text() if item else '')
+                lines.append('\t'.join(row_data))
+            clipboard_text = '\n'.join(lines)
+        else:
+            QMessageBox.warning(self, "Нет данных", "Нет таблицы для копирования.")
+            return
+
+        clipboard = QApplication.clipboard()
+        clipboard.setText(clipboard_text)
+        QMessageBox.information(self, "Успех", "Таблица скопирована в буфер обмена.")
+
+    def table_context_menu(self, pos):
+        menu = QMenu()
+        copy_action = menu.addAction("Копировать таблицу")
+        action = menu.exec(self.table.mapToGlobal(pos))
+        if action == copy_action:
+            self.copy_table_to_clipboard()
 
     # =========================
     # ЗАГРУЗКА ФАЙЛОВ
@@ -437,21 +470,15 @@ class MainWindow(QMainWindow):
             'P': np.nan
         })
 
-        # стартуем с забоя
         well_df.loc[len(well_df)-1, 'P'] = BHP
 
-        # идём СНИЗУ ВВЕРХ
         for idx in well_df.index[::-1]:
-
             if idx == 0:
                 break
 
             temp_idx = Temp_THP + (Temp_BHP - Temp_THP) / well_df['TVD'].iloc[-1] * well_df.loc[idx, 'TVD']
-
-            P_local = well_df.loc[idx, 'P'] #МПа
-
+            P_local = well_df.loc[idx, 'P']
             density_gas_idx = fluid.get_ro(P_local, temp_idx)
-
             velocity_liquid_idx = ((Qgas * 1000 / 86400) * WGR) / (np.pi * diameter**2 / 4)
             velocity_gas_idx = (Qgas * 1000 / 86400) * fluid.get_fvf(P_local) / (np.pi * diameter**2 / 4)
 
@@ -482,41 +509,30 @@ class MainWindow(QMainWindow):
                 )
 
             dL = well_df.loc[idx, 'MD'] - well_df.loc[idx-1, 'MD']
-
-            # движение вверх → давление падает
             well_df.loc[idx-1, 'P'] = P_local - dp_dz * 1e-6 * dL
 
-        return well_df.loc[0, 'P']  # THP
-    
-    # Правильная формула расчёта BHP:
+        return well_df.loc[0, 'P']
+
     def well_BHP(self, well_data: pd, fluid: Fluid, THP_target,
                  Temp_THP, Temp_BHP,
                  Qgas, WGR, diameter, delta0, sigma, density_liquid):
 
-        # начальные границы (важно!)
         BHP_min = THP_target
-        BHP_max = THP_target + 50  # запас (МПа)
-
+        BHP_max = THP_target + 50
         tol = 1e-3
         max_iter = 50
 
         for _ in range(max_iter):
-
             BHP_mid = 0.5 * (BHP_min + BHP_max)
-
             THP_calc = self.calc_THP_from_BHP(
                 well_data, fluid, BHP_mid,
                 Temp_THP, Temp_BHP,
                 Qgas, WGR,
                 diameter, delta0, sigma, density_liquid
             )
-
             error = THP_calc - THP_target
-
             if abs(error) < tol:
                 return BHP_mid
-
-            # бисекция
             if error > 0:
                 BHP_max = BHP_mid
             else:
@@ -524,7 +540,6 @@ class MainWindow(QMainWindow):
 
         print("Warning: BHP not converged")
         return BHP_mid
-
 
     def adapt_gdi(self, gdi_data, delta0, density_liquid):
         params = self.get_input_parameters()
@@ -737,24 +752,6 @@ class MainWindow(QMainWindow):
         for i in range(len(df)):
             for j in range(len(df.columns)):
                 self.table.setItem(i, j, QTableWidgetItem(str(df.iloc[i, j])))
-
-    # =========================
-    # ДЕМО-СЛАЙДЕР
-    # =========================
-    def update_plot(self):
-        value = self.slider.value()
-        if self.vfp_data is not None and not self.vfp_data.empty:
-            return
-
-        self.figure.clear()
-        ax = self.figure.add_subplot(111)
-        x = np.linspace(0, 100, 50)
-        y = x * (value + 1)
-        ax.plot(x, y)
-        ax.set_title(f"Slider = {value}")
-        ax.grid(True)
-        self.figure.tight_layout()
-        self.canvas.draw()
 
 
 app = QApplication(sys.argv)
